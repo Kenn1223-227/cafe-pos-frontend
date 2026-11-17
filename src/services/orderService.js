@@ -2,8 +2,13 @@ import axiosClient from '../api/axiosClient'
 
 export const orderService = {
   // Tạo order mới hoặc gọi thêm món vào bàn đang mở
-  create: ({ maBan, maKH, danhSachMon }) =>
-    axiosClient.post('/order', { maBan, maKH, danhSachMon }),
+  // idempotencyKey: gửi lại CÙNG key khi retry => server trả lại đơn cũ thay vì tạo đơn trùng
+  create: ({ maBan, maKH, danhSachMon }, idempotencyKey) =>
+    axiosClient.post(
+      '/order',
+      { maBan, maKH, danhSachMon },
+      idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined
+    ),
 
   // Lấy hóa đơn đang mở (TrangThaiTT = 0) của 1 bàn
   getByTable: async (maBan) => {
@@ -30,7 +35,8 @@ export const orderService = {
   getToppings: () => axiosClient.get('/topping'),
 
   // Barista & Waiter APIs
-  getDangCho: () => axiosClient.get('/order/dangcho'),
+  // config: truyền { silent: true } để tự xử lý lỗi (dùng cho đồng bộ nền của màn hình Barista)
+  getDangCho: (config) => axiosClient.get('/order/dangcho', config),
   nhanLam: (maCTHD) => axiosClient.put('/order/danglam', { maCTHD }),
   traMon: (maCTHD) => axiosClient.put('/order/tramon', { maCTHD }),
   getChoPhucVu: () => axiosClient.get('/order/chophucvu'),

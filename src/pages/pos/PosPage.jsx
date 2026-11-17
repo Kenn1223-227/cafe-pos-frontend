@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { banService } from '../../services/banService'
@@ -16,6 +16,7 @@ import CustomerBox from './components/CustomerBox'
 import Cart from './components/Cart'
 import ThuChiModal from './components/ThuChiModal'
 import { formatVND, formatDateTime } from '../../utils/format'
+import { newIdempotencyKey } from '../../utils/idempotency'
 
 export default function PosPage() {
   const { user, logout } = useAuthStore()
@@ -51,6 +52,11 @@ export default function PosPage() {
   const [showDongCaModal, setShowDongCaModal] = useState(false)
   const [tienThucTeInput, setTienThucTeInput] = useState('')
   const [closingShift, setClosingShift] = useState(false)
+
+  // Chống tạo đơn trùng: khóa đồng bộ (state `submitting` cập nhật chậm nên 2 lần chạm nhanh vẫn lọt)
+  // + Idempotency-Key gắn với đúng nội dung order, giữ nguyên cho tới khi gửi thành công.
+  const submitLockRef = useRef(false)
+  const orderKeyRef = useRef(null) // { key, dauVanTay }
 
   const loadPosData = useCallback(async () => {
     try {
@@ -135,6 +141,8 @@ export default function PosPage() {
       return
     }
 
+    if (submitLockRef.current) return
+    submitLockRef.current = true
     setSubmitting(true)
     try {
       const payload = {
@@ -152,7 +160,14 @@ export default function PosPage() {
         })),
       }
 
-      const res = await orderService.create(payload)
+      // Cùng nội dung => cùng key (retry sau timeout/rớt mạng không tạo đơn thứ hai).
+      // Sửa giỏ hàng => nội dung đổi => key mới.
+      const dauVanTay = JSON.stringify(payload)
+      if (!orderKeyRef.current || orderKeyRef.current.dauVanTay !== dauVanTay) {
+        orderKeyRef.current = { key: newIdempotencyKey(), dauVanTay }
+      }
+      const res = await orderService.create(payload, orderKeyRef.current.key)
+      orderKeyRef.current = null
       toast.success(res.message || `Đã tạo order #${res.maHoaDon}`)
       clearCart()
       setActiveInvoice(res.hoaDon)
@@ -170,6 +185,7 @@ export default function PosPage() {
         toast.error(`Hết nguyên liệu:\n${detail}`, { duration: 5000 })
       }
     } finally {
+      submitLockRef.current = false
       setSubmitting(false)
     }
   }
